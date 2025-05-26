@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Event Calendar</title>
+  <script src="https://unpkg.com/react@17.0.2/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@17.0.2/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/date-fns@2.30.0/dist/date-fns.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dnd/14.0.5/index.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dnd-html5-backend/14.0.2/index.umd.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.23.2/babel.min.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    // Function to check if all dependencies are loaded
+    function checkDependencies(callback) {
+      const checkInterval = setInterval(() => {
+        if (
+          window.React &&
+          window.ReactDOM &&
+          window.dateFns &&
+          window.dateFns.format &&
+          window.ReactDND &&
+          window.ReactDNDHTML5Backend
+        ) {
+          clearInterval(checkInterval);
+          callback();
+        }
+      }, 100);
+    }
+
+    // Main application code
+    checkDependencies(() => {
+      const ReactDnD = window.ReactDND;
+      const ReactDnDHTML5Backend = window.ReactDNDHTML5Backend;
+      const isDnDAvailable = !!ReactDnD && !!ReactDnDHTML5Backend;
+
+      if (!isDnDAvailable) {
+        console.error('ReactDnD or ReactDnDHTML5Backend failed to load. Drag-and-drop will be disabled.');
+      }
+
+      // Check for date-fns specifically
+      const dateFns = window.dateFns;
+      if (!dateFns || !dateFns.format) {
+        console.error('date-fns failed to load or format function is unavailable.');
+        document.getElementById('root').innerHTML = '<div class="p-4 text-red-500">Error: Failed to load date-fns library. Please try again later.</div>';
+        return;
+      }
+
+      const { useState, useEffect, Component } = React;
+      const { format, addMonths, subMonths, startOfMonth, endOfMonth, eachDayOfMonth, isSameDay, parseISO, addDays, addWeeks, addMonths: addMonthsFn } = dateFns;
+
+      // Error Boundary Component
+      class ErrorBoundary extends Component {
+        state = { error: null };
+        static getDerivedStateFromError(error) {
+          return { error: error.message };
+        }
+        render() {
+          if (this.state.error) {
+            return (
+              <div className="p-4 text-red-500">
+                <h2>Error: {this.state.error}</h2>
+                <p>Please check the console for details and ensure all dependencies are loaded.</p>
+              </div>
+            );
+          }
+          return this.props.children;
+        }
+      }
+
+      // Event storage utility
+      const loadEvents = () => {
+        try {
+          return JSON.parse(localStorage.getItem('events')) || [];
+        } catch (e) {
+          console.error('Error loading events:', e);
+          return [];
+        }
+      };
+      const saveEvents = (events) => {
+        try {
+          localStorage.setItem('events', JSON.stringify(events));
+        } catch (e) {
+          console.error('Error saving events:', e);
+        }
+      };
+
+      // Event Form Component
+      const EventForm = ({ date, onSave, onCancel, event = {} }) => {
+        const [title, setTitle] = useState(event.title || '');
+        const [time, setTime] = useState(event.time || '12:00');
+        const [description, setDescription] = useState(event.description || '');
+        const [recurrence, setRecurrence] = useState(event.recurrence || 'none');
+        const [color, setColor] = useState(event.color || '#3b82f6');
+
+        const handleSubmit = (e) => {
+          e.preventDefault();
+          const newEvent = {
+            id: event.id || Date.now().toString(),
+            title,
+            date: format(date, 'yyyy-MM-dd'),
+            time,
+            description,
+            recurrence,
+            color,
+          };
+          onSave(newEvent);
+        };
+
+        return (
+          <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center">
+            <form onSubmit={handleSubmit} className="bg-white p-6 rounded-lg shadow-lg w-96">
+              <h2 className="text-lg font-bold mb-4">{event.id ? 'Edit Event' : 'Add Event'}</h2>
+              <div className="mb-4">
+                <label className="block text-sm font-medium">Title</label>
+                <input
+                  type="text"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  className="w-full p-2 border rounded"
+                  required
+                />
+              </div>
+              <div className="mb-4">
+                <label className="block text-sm font-medium">Time</label>
+                <input
+                  type="time"
+                  value={time}
+                  onChange={(e) => setTime(e.target.value)}
+                  className="w-full p-2 border rounded"
+                />
+              </div>
+              <div className="mb-4">
+                <label className="block text-sm font-medium">Description</label>
+                <textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  className="w-full p-2 border rounded"
+                />
+              </div>
+              <div className="mb-4">
+                <label className="block text-sm font-medium">Recurrence</label>
+                <select
+                  value={recurrence}
+                  onChange={(e) => setRecurrence(e.target.value)}
+                  className="w-full p-2 border rounded"
+                >
+                  <option value="none">None</option>
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
+                </select>
+              </div>
+              <div className="mb-4">
+                <label className="block text-sm font-medium">Color</label>
+                <input
+                  type="color"
+                  value={color}
+                  onChange={(e) => setColor(e.target.value)}
+                  className="w-full p-2 border rounded"
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <button type="button" onClick={onCancel} className="px-4 py-2 bg-gray-300 rounded">
+                  Cancel
+                </button>
+                <button type="submit" className="px-4 py-2 bg-blue-500 text-white rounded">
+                  Save
+                </button>
+              </div>
+            </form>
+          </div>
+        );
+      };
+
+      // Event Item Component (without drag if DnD is unavailable)
+      const EventItem = ({ event, onEdit, onDelete }) => {
+        if (!isDnDAvailable) {
+          return (
+            <div
+              className="p-2 m-1 rounded text-sm text-white"
+              style={{ backgroundColor: event.color }}
+            >
+              <div onClick={() => onEdit(event)}>{event.title} - {event.time}</div>
+              <button
+                onClick={() => onDelete(event.id)}
+                className="text-xs text-red-200 hover:text-red-100"
+              >
+                Delete
+              </button>
+            </div>
+          );
+        }
+
+        const [{ isDragging }, drag] = ReactDnD.useDrag({
+          type: 'EVENT',
+          item: { id: event.id, date: event.date },
+          collect: (monitor) => ({
+            isDragging: monitor.isDragging(),
+          }),
+        });
+
+        return (
+          <div
+            ref={drag}
+            className="p-2 m-1 rounded text-sm text-white cursor-move"
+            style={{ backgroundColor: event.color, opacity: isDragging ? 0.5 : 1 }}
+          >
+            <div onClick={() => onEdit(event)}>{event.title} - {event.time}</div>
+            <button
+              onClick={() => onDelete(event.id)}
+              className="text-xs text-red-200 hover:text-red-100"
+            >
+              Delete
+            </button>
+          </div>
+        );
+      };
+
+      // Calendar Day Component (without drop if DnD is unavailable)
+      const CalendarDay = ({ day, events, onDayClick, onDrop, onEdit, onDelete }) => {
+        if (!isDnDAvailable) {
+          const isToday = isSameDay(day, new Date());
+          const dayEvents = events.filter((event) => isSameDay(parseISO(event.date), day));
+
+          return (
+            <div
+              className={`p-2 border h-24 overflow-auto ${isToday ? 'bg-blue-100' : ''}`}
+              onClick={() => onDayClick(day)}
+            >
+              <div className="text-sm font-bold">{format(day, 'd')}</div>
+              {dayEvents.map((event) => (
+                <EventItem key={event.id} event={event} onEdit={onEdit} onDelete={onDelete} />
+              ))}
+            </div>
+          );
+        }
+
+        const [{ isOver }, drop] = ReactDnD.useDrop({
+          accept: 'EVENT',
+          drop: (item) => onDrop(item.id, format(day, 'yyyy-MM-dd')),
+          collect: (monitor) => ({
+            isOver: monitor.isOver(),
+          }),
+        });
+
+        const isToday = isSameDay(day, new Date());
+        const dayEvents = events.filter((event) => isSameDay(parseISO(event.date), day));
+
+        return (
+          <div
+            ref={drop}
+            className={`p-2 border h-24 overflow-auto ${isToday ? 'bg-blue-100' : ''} ${isOver ? 'bg-gray-200' : ''}`}
+            onClick={() => onDayClick(day)}
+          >
+            <div className="text-sm font-bold">{format(day, 'd')}</div>
+            {dayEvents.map((event) => (
+              <EventItem key={event.id} event={event} onEdit={onEdit} onDelete={onDelete} />
+            ))}
+          </div>
+        );
+      };
+
+      // Main Calendar Component
+      const Calendar = () => {
+        const [currentMonth, setCurrentMonth] = useState(new Date());
+        const [events, setEvents] = useState(loadEvents());
+        const [showForm, setShowForm] = useState(false);
+        const [selectedDate, setSelectedDate] = useState(null);
+        const [editingEvent, setEditingEvent] = useState(null);
+
+        useEffect(() => {
+          saveEvents(events);
+        }, [events]);
+
+        const generateRecurringEvents = (event) => {
+          const newEvents = [event];
+          const startDate = parseISO(event.date);
+          if (event.recurrence === 'daily') {
+            for (let i = 1; i <= 30; i++) {
+              newEvents.push({
+                ...event,
+                id: `${event.id}-${i}`,
+                date: format(addDays(startDate, i), 'yyyy-MM-dd'),
+              });
+            }
+          } else if (event.recurrence === 'weekly') {
+            for (let i = 1; i <= 4; i++) {
+              newEvents.push({
+                ...event,
+                id: `${event.id}-${i}`,
+                date: format(addWeeks(startDate, i), 'yyyy-MM-dd'),
+              });
+            }
+          } else if (event.recurrence === 'monthly') {
+            for (let i = 1; i <= 12; i++) {
+              newEvents.push({
+                ...event,
+                id: `${event.id}-${i}`,
+                date: format(addMonthsFn(startDate, i), 'yyyy-MM-dd'),
+              });
+            }
+          }
+          return newEvents;
+        };
+
+        const handleSaveEvent = (event) => {
+          const newEvents = generateRecurringEvents(event);
+          if (editingEvent) {
+            setEvents((prev) =>
+              prev
+                .filter((e) => !e.id.startsWith(editingEvent.id))
+                .concat(newEvents)
+            );
+          } else {
+            // Check for conflicts
+            const conflict = events.some(
+              (e) =>
+                e.date === event.date &&
+                e.time === event.time &&
+                e.id !== event.id
+            );
+            if (conflict) {
+              alert('Event conflict detected! Please choose a different time.');
+              return;
+            }
+            setEvents((prev) => [...prev, ...newEvents]);
+          }
+          setShowForm(false);
+          setEditingEvent(null);
+        };
+
+        const handleDeleteEvent = (id) => {
+          setEvents((prev) => prev.filter((e) => !e.id.startsWith(id.split('-')[0])));
+        };
+
+        const handleDrop = (id, newDate) => {
+          setEvents((prev) => {
+            const event = prev.find((e) => e.id === id);
+            if (!event) return prev;
+            const newEvents = generateRecurringEvents({
+              ...event,
+              date: newDate,
+              id: Date.now().toString(),
+            });
+            return prev
+              .filter((e) => !e.id.startsWith(id.split('-')[0]))
+              .concat(newEvents);
+          });
+        };
+
+        const days = eachDayOfMonth(startOfMonth(currentMonth));
+        const weeks = [];
+        let week = [];
+        days.forEach((day, index) => {
+          week.push(day);
+          if (week.length === 7 || index === days.length - 1) {
+            weeks.push(week);
+            week = [];
+          }
+        });
+
+        const calendarContent = (
+          <div className="container mx-auto p-4">
+            {!isDnDAvailable && (
+              <div className="p-2 mb-4 text-yellow-600 bg-yellow-100 rounded">
+                Drag-and-drop is disabled due to library loading issues.
+              </div>
+            )}
+            <div className="flex justify-between mb-4">
+              <button
+                onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}
+                className="px-4 py-2 bg-blue-500 text-white rounded"
+              >
+                Previous
+              </button>
+              <h1 className="text-2xl font-bold">{format(currentMonth, 'MMMM yyyy')}</h1>
+              <button
+                onClick={() => setCurrentMonth(addMonths(currentMonth, 1))}
+                className="px-4 py-2 bg-blue-500 text-white rounded"
+              >
+                Next
+              </button>
+            </div>
+            <div className="grid grid-cols-7 gap-1">
+              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
+                <div key={day} className="text-center font-bold">{day}</div>
+              ))}
+              {weeks.map((week, i) => (
+                <React.Fragment key={i}>
+                  {week.map((day) => (
+                    <CalendarDay
+                      key={day}
+                      day={day}
+                      events={events}
+                      onDayClick={(date) => {
+                        setSelectedDate(date);
+                        setShowForm(true);
+                        setEditingEvent(null);
+                      }}
+                      onDrop={handleDrop}
+                      onEdit={(event) => {
+                        setEditingEvent(event);
+                        setSelectedDate(parseISO(event.date));
+                        setShowForm(true);
+                      }}
+                      onDelete={handleDeleteEvent}
+                    />
+                  ))}
+                </React.Fragment>
+              ))}
+            </div>
+            {showForm && (
+              <EventForm
+                date={selectedDate}
+                event={editingEvent}
+                onSave={handleSaveEvent}
+                onCancel={() => {
+                  setShowForm(false);
+                  setEditingEvent(null);
+                }}
+              />
+            )}
+          </div>
+        );
+
+        return isDnDAvailable ? (
+          <ReactDnD.DndProvider backend={ReactDnDHTML5Backend.HTML5Backend}>
+            {calendarContent}
+          </ReactDnD.DndProvider>
+        ) : (
+          calendarContent
+        );
+      };
+
+      // Render the app with Error Boundary
+      ReactDOM.render(
+        <ErrorBoundary>
+          <Calendar />
+        </ErrorBoundary>,
+        document.getElementById('root')
+      );
+    });
+  </script>
+</body>
+</html>
